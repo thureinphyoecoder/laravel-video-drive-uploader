@@ -3,10 +3,11 @@ version: "3.9"
 services:
   app:
     build: ./docker/php
-    container_name: app
     volumes:
       - ./src:/var/www
     working_dir: /var/www
+    depends_on:
+      - db
 
   nginx:
     image: nginx:alpine
@@ -19,9 +20,17 @@ services:
       - app
 
   db:
-    image: mysql:8
+    image: mysql:8.0
+    container_name: mysql
     environment:
       MYSQL_DATABASE: laravel
+      MYSQL_USER: laravel
+      MYSQL_PASSWORD: secret
       MYSQL_ROOT_PASSWORD: root
     ports:
       - "3306:3306"
+    volumes:
+      - dbdata:/var/lib/mysql
+
+volumes:
+  dbdata:
