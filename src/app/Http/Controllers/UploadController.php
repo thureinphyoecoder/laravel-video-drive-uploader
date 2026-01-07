@@ -33,7 +33,7 @@ class UploadController extends Controller
 
         return response()->json([
             'id' => $video->id,
-            'status' => $$video->status,
+            'status' => $video->status,
         ]);
     }
 }

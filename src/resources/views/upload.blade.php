@@ -87,9 +87,14 @@
 
             xhr.open('POST', '/upload');
 
+            //  CSRF header 
+            const token = document.querySelector('input[name="_token"]').value;
+            xhr.setRequestHeader('X-CSRF-TOKEN', token);
+
             xhr.upload.onprogress = function(e) {
                 if (e.lengthComputable) {
-                    const percent = (e.load / e.total) * 100;
+                    //  loaded (not load)
+                    const percent = (e.loaded / e.total) * 100;
                     progress.style.width = percent + '%';
                     status.innerText = `Uploading ${Math.round(percent)}%`;
                 }
@@ -97,15 +102,37 @@
 
             xhr.onload = function() {
                 if (xhr.status === 200) {
-                    status.innerText = 'Upload complete. Processing';
+                    const res = JSON.parse(xhr.responseText);
+                    status.innerText = 'Processing....';
+
+                    pollStatus(res.id);
                 } else {
                     status.innerText = 'Upload Failed';
                 }
             };
 
+            xhr.onerror = function() {
+                status.innerText = 'Network error';
+            };
+
             xhr.send(formData);
-        })
+
+            function pollStatus(videoId) {
+                const interval = setInterval(() => {
+                    fetch(`/videos/${videoId}/status`)
+                        .then(res => res.json())
+                        .then(data => {
+                            status.innerText = `Status: ${data.status}`;
+
+                            if (data.status === 'done') {
+                                clearInterval(interval);
+                            }
+                        });
+                }, 2000);
+            }
+        });
     </script>
+
 </body>
 
 </html>
