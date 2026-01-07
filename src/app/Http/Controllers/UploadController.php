@@ -5,22 +5,23 @@ namespace App\Http\Controllers;
 use App\Jobs\ProcessVideo;
 use Illuminate\Http\Request;
 use App\Models\Video;
-
-
-// use Illuminate\Support\Facades\Storage;
-
+use Illuminate\Validation\ValidationException;
 
 class UploadController extends Controller
 {
     public function store(Request $request)
     {
-        $request->validate([
-            'video' => 'required|file|max:512000', // 500 MB
+        $validated = $request->validate([
+            'video' => [
+                'required',
+                'file',
+                'mimes:mp4,mov,mkv',
+                'max:512000',
+            ],
         ]);
 
-        $file = $request->file('video');
-
-        $path = $file->store('uploads');
+        $file = $validated['video'];
+        $path = $file->store('uploads', 'local');
 
         $video = Video::create([
             'original_name' => $file->getClientOriginalName(),

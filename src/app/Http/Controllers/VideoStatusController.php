@@ -11,6 +11,7 @@ class VideoStatusController extends Controller
     {
         return response()->json([
             'status' => $video->status,
+            'download_url' => $video->download_url,
         ]);
     }
 }

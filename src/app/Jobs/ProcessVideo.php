@@ -2,35 +2,51 @@
 
 namespace App\Jobs;
 
+use App\Models\Video;
+use App\Services\GoogleDriveService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use App\Models\Video;
+use Illuminate\Support\Facades\Log;
 
 class ProcessVideo implements ShouldQueue
 {
     use Queueable;
 
-    /**
-     * Create a new job instance.
-     */
-    public function __construct(public Video $video)
+    public function __construct(public Video $video) {}
+
+    public function handle(GoogleDriveService $drive): void
     {
-        //
-    }
+        $this->video->update(['status' => 'processing']);
 
-    /**
-     * Execute the job.
-     */
-    public function handle(): void
-    {
-        $this->video->update([
-            'status' => 'processing',
-        ]);
+        $localPath = storage_path('app/' . $this->video->path);
 
-        sleep(3);
+        if (!file_exists($localPath)) {
+            Log::error('Local video missing', ['video_id' => $this->video->id]);
+            $this->video->update(['status' => 'failed']);
+            return;
+        }
 
-        $this->video->update([
-            'status' => 'done',
-        ]);
+        try {
+            $result = $drive->upload(
+                $localPath,
+                $this->video->original_name
+            );
+
+            $this->video->update([
+                'status' => 'done',
+                'drive_file_id' => $result['file_id'],
+                'download_url' => $result['download_url'],
+            ]);
+
+            unlink($localPath);
+        } catch (\Throwable $e) {
+            Log::error('Video processing failed', [
+                'video_id' => $this->video->id,
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            $this->video->update(['status' => 'failed']);
+        }
     }
 }
