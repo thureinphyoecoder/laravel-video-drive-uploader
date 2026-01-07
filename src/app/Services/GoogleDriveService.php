@@ -2,56 +2,91 @@
 
 namespace App\Services;
 
+use App\Models\User;
 use Google\Client;
 use Google\Service\Drive;
 use Google\Service\Drive\DriveFile;
-use Google\Service\Drive\Permission;
+use Illuminate\Support\Facades\Log;
 
 class GoogleDriveService
 {
-    protected Drive $drive;
-
-    public function __construct()
+    public static function clientForUser(User $user): Drive
     {
         $client = new Client();
-        $client->setAuthConfig(config('services.google.drive_json'));
-        $client->addScope(Drive::DRIVE);
-        $client->addScope('https://www.googleapis.com/auth/drive'); // Add full drive scope
+        $client->setClientId(config('services.google.client_id'));
+        $client->setClientSecret(config('services.google.client_secret'));
+        $client->setAccessType('offline');
 
-        $this->drive = new Drive($client);
-    }
+        $client->setApprovalPrompt('force');
+        $client->setScopes([Drive::DRIVE_FILE]);
 
-    public function upload(string $localPath, string $fileName): array
-    {
-        $fileMetadata = new DriveFile([
-            'name'    => $fileName,
-            'driveId' => config('services.google.shared_drive_id'), // Use shared drive
-            'parents' => [config('services.google.folder_id')],
+        $client->setAccessToken([
+            'access_token'  => $user->google_access_token,
+            'refresh_token' => $user->google_refresh_token,
+            'expires_in'    => 3600,
+
+            'created'       => $user->updated_at->timestamp,
         ]);
 
-        $file = $this->drive->files->create(
-            $fileMetadata,
-            [
-                'data'       => file_get_contents($localPath),
-                'mimeType'   => mime_content_type($localPath),
-                'uploadType' => 'multipart',
-                'supportsAllDrives' => true, // Enable shared drive support
-                'fields'     => 'id',
-            ]
-        );
+        if ($client->isAccessTokenExpired()) {
+            if ($user->google_refresh_token) {
+                try {
+                    $token = $client->fetchAccessTokenWithRefreshToken($user->google_refresh_token);
 
-        // public permission
-        $this->drive->permissions->create(
-            $file->id,
-            new Permission([
-                'type' => 'anyone',
-                'role' => 'reader',
-            ])
-        );
+                    if (!isset($token['error'])) {
 
-        return [
-            'file_id'      => $file->id,
-            'download_url' => "https://drive.google.com/uc?id={$file->id}&export=download",
-        ];
+                        $user->update([
+                            'google_access_token' => $token['access_token'],
+
+                            'google_token_expires_at' => now()->addSeconds($token['expires_in']),
+                        ]);
+                    } else {
+                        Log::error("Google Token Refresh Error: " . $token['error']);
+                    }
+                } catch (\Exception $e) {
+                    Log::error("Google Auth Exception: " . $e->getMessage());
+                }
+            }
+        }
+
+        return new Drive($client);
+    }
+
+    public static function upload(Drive $drive, string $path, string $name): string
+    {
+
+        $folderId = config('services.google.folder_id');
+
+        $fileMetadata = new DriveFile([
+            'name' => $name,
+            'parents' => $folderId ? [$folderId] : [],
+        ]);
+
+
+        $content = fopen($path, 'r');
+
+        try {
+
+            $uploaded = $drive->files->create(
+                $fileMetadata,
+                [
+                    'data' => $content,
+                    'mimeType' => mime_content_type($path),
+
+                    'uploadType' => 'resumable',
+                    'fields' => 'id',
+                ]
+            );
+
+            return $uploaded->id;
+        } catch (\Exception $e) {
+            Log::error("Google Drive Upload Failed: " . $e->getMessage());
+            throw $e;
+        } finally {
+
+            if (is_resource($content)) {
+                fclose($content);
+            }
+        }
     }
 }

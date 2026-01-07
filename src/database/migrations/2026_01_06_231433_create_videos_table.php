@@ -13,10 +13,12 @@ return new class extends Migration
     {
         Schema::create('videos', function (Blueprint $table) {
             $table->id();
+            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->string('original_name');
             $table->string('path');
-            $table->unsignedBigInteger('size');
-            $table->string('status')->default('uploaded');
+            $table->string('status'); // queued, processing, done, failed
+            $table->string('drive_file_id')->nullable();
+            $table->string('mp3_drive_file_id')->nullable();
             $table->timestamps();
         });
     }

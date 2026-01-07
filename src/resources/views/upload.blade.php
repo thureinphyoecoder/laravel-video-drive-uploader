@@ -18,7 +18,7 @@
 
 
         <!-- Form -->
-        <form id="uploadForm" class="space-y-4">
+        <form id="uploadForm" class="space-y-4" enctype="multipart/form-data">
             @csrf
 
             <input type="file" name="video" accept="video/mp4,video/quicktime,video/x-matroska" required

@@ -36,9 +36,10 @@ return [
     ],
 
     'google' => [
-        'drive_json' => env('GOOGLE_DRIVE_JSON'),
         'folder_id'  => env('GOOGLE_DRIVE_FOLDER_ID'),
-        'shared_drive_id' => env('GOOGLE_SHARED_DRIVE_ID'),
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect' => env('GOOGLE_REDIRECT_URI'),
     ],
 
 ];
