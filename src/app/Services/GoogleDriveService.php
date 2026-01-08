@@ -6,7 +6,9 @@ use App\Models\User;
 use Google\Client;
 use Google\Service\Drive;
 use Google\Service\Drive\DriveFile;
+use Google\Service\Drive\Permission;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Crypt;
 
 class GoogleDriveService
 {
@@ -16,77 +18,105 @@ class GoogleDriveService
         $client->setClientId(config('services.google.client_id'));
         $client->setClientSecret(config('services.google.client_secret'));
         $client->setAccessType('offline');
-
-        $client->setApprovalPrompt('force');
         $client->setScopes([Drive::DRIVE_FILE]);
 
-        $client->setAccessToken([
-            'access_token'  => $user->google_access_token,
-            'refresh_token' => $user->google_refresh_token,
-            'expires_in'    => 3600,
+        try {
+            $accessToken = Crypt::decryptString($user->google_access_token);
+            $refreshToken = $user->google_refresh_token ? Crypt::decryptString($user->google_refresh_token) : null;
 
-            'created'       => $user->updated_at->timestamp,
-        ]);
+            $client->setAccessToken([
+                'access_token'  => $accessToken,
+                'refresh_token' => $refreshToken,
+                'expires_in'    => 3600,
+                'created'       => $user->updated_at->timestamp,
+            ]);
 
-        if ($client->isAccessTokenExpired()) {
-            if ($user->google_refresh_token) {
-                try {
-                    $token = $client->fetchAccessTokenWithRefreshToken($user->google_refresh_token);
-
-                    if (!isset($token['error'])) {
-
+            if ($client->isAccessTokenExpired()) {
+                if ($refreshToken) {
+                    $newToken = $client->fetchAccessTokenWithRefreshToken($refreshToken);
+                    if (!isset($newToken['error'])) {
                         $user->update([
-                            'google_access_token' => $token['access_token'],
-
-                            'google_token_expires_at' => now()->addSeconds($token['expires_in']),
+                            'google_access_token' => Crypt::encryptString($newToken['access_token']),
+                            'google_token_expires_at' => now()->addSeconds($newToken['expires_in']),
                         ]);
-                    } else {
-                        Log::error("Google Token Refresh Error: " . $token['error']);
                     }
-                } catch (\Exception $e) {
-                    Log::error("Google Auth Exception: " . $e->getMessage());
                 }
             }
+        } catch (\Exception $e) {
+            Log::error("Google Auth Error: " . $e->getMessage());
+            throw $e;
         }
 
         return new Drive($client);
     }
 
-    public static function upload(Drive $drive, string $path, string $name): string
+    public static function upload(Drive $drive, string $path, string $name, ?string $folderId = null): string
     {
+        $extension = pathinfo($name, PATHINFO_EXTENSION);
+        $mimeType = ($extension === 'mp3') ? 'audio/mpeg' : 'video/mp4';
 
-        $folderId = config('services.google.folder_id');
+
+        $parents = $folderId ? [$folderId] : (config('services.google.folder_id') ? [config('services.google.folder_id')] : []);
 
         $fileMetadata = new DriveFile([
             'name' => $name,
-            'parents' => $folderId ? [$folderId] : [],
+            'parents' => $parents,
         ]);
 
-
-        $content = fopen($path, 'r');
+        $content = file_get_contents($path);
 
         try {
+            $uploaded = $drive->files->create($fileMetadata, [
+                'data' => $content,
+                'mimeType' => $mimeType,
+                'uploadType' => 'multipart',
+                'fields' => 'id',
+            ]);
 
-            $uploaded = $drive->files->create(
-                $fileMetadata,
-                [
-                    'data' => $content,
-                    'mimeType' => mime_content_type($path),
+            if (!$uploaded->id) {
+                throw new \Exception("Upload succeeded but ID was not returned.");
+            }
 
-                    'uploadType' => 'resumable',
-                    'fields' => 'id',
-                ]
-            );
+            try {
+                $permission = new Permission([
+                    'type' => 'anyone',
+                    'role' => 'reader',
+                ]);
+                $drive->permissions->create($uploaded->id, $permission);
+            } catch (\Exception $pe) {
+                Log::warning("Could not set file permission: " . $pe->getMessage());
+            }
 
             return $uploaded->id;
         } catch (\Exception $e) {
-            Log::error("Google Drive Upload Failed: " . $e->getMessage());
+            Log::error("Drive Upload Failed: " . $e->getMessage());
             throw $e;
-        } finally {
-
-            if (is_resource($content)) {
-                fclose($content);
-            }
         }
+    }
+
+    public static function getOrCreateUserFolder(Drive $driveService, $folderName = 'VideoToMp3_Uploads')
+    {
+        $query = "mimeType='application/vnd.google-apps.folder' and name='$folderName' and trashed=false";
+        $results = $driveService->files->listFiles(['q' => $query]);
+
+        if (count($results->getFiles()) > 0) {
+            return $results->getFiles()[0]->id;
+        }
+
+        $folderMetadata = new DriveFile([
+            'name' => $folderName,
+            'mimeType' => 'application/vnd.google-apps.folder'
+        ]);
+
+        $folder = $driveService->files->create($folderMetadata, ['fields' => 'id']);
+        $folderId = $folder->id;
+
+        $permission = new Permission([
+            'type' => 'anyone',
+            'role' => 'reader',
+        ]);
+        $driveService->permissions->create($folderId, $permission);
+
+        return $folderId;
     }
 }
