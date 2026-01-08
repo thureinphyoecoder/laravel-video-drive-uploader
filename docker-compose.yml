@@ -4,15 +4,20 @@ services:
     build:
       context: .
       dockerfile: docker/php/worker.Dockerfile
+    container_name: laravel-video-worker
+    restart: unless-stopped
     volumes:
       - ./src:/var/www
     working_dir: /var/www
+    command: php artisan queue:work --tries=3 --timeout=3600
     depends_on:
       - db
 
 
   app:
     build: ./docker/php
+    container_name: laravel-video-app
+    restart: unless-stopped
     volumes:
       - ./src:/var/www
     working_dir: /var/www
